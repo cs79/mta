@@ -101,3 +101,57 @@ def _fastai_dateparts(df):
     idf['Date'] = idf.index
     add_datepart(idf, 'Date')
     return idf
+
+def _calc_events(df):
+    '''
+    Possibly too generic - may be wrapper for other things
+    '''
+
+    return None
+
+def _ttg(df, cols=None, percs=[.05, .1, .2, .25, .5]):
+    '''
+    This may be a specific case of "time since event"
+    '''
+    idf = df.copy()
+    if cols is None:
+        idf = idf._get_numeric_data()
+    else:
+        idf = idf[cols]
+    # create new event columns for each relevant col; increment while gaining perc
+    return None
+
+def _streak(df, cols=None):
+    '''
+    '''
+    idf = df.copy()
+    if cols is None:
+        cols = idf._get_numeric_data().columns  # won't be perfect; watch for datepart
+    for col in cols:
+        idf[col + '_streak'] = _col_streak(list(df[col]))
+    return idf
+
+'''
+TODO:
+try to create a numpy vectorized version of the below that uses sign of difference instead of looping and subtracting each while keeping track of direction
+'''
+def _col_streak(l):
+    assert type(l) == list, 'l must be a list'
+    tr = [0]
+    sl = ['z']
+    for i in range(1, len(l)):
+        # up case
+        if l[i] >= l[i-1]:
+            if sl[i-1] in ('z', 'u'):
+                tr.append(tr[i-1] + 1)
+            else:
+                tr.append(1)
+            sl.append('u')
+        # down case
+        else:
+            if sl[i-1] in ('z', 'd'):
+                tr.append(tr[i-1] - 1)
+            else:
+                tr.append(-1)
+            sl.append('d')
+    return tr
