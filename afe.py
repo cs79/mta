@@ -7,7 +7,7 @@
 import pandas as pd
 import numpy as np  # not sure if we will use
 from fastai.structured import add_datepart
-import warnings
+import warnings, copy
 
 #===========#
 # Functions #
@@ -17,32 +17,55 @@ import warnings
 # Utilities #
 #-----------#
 
-def _check_input(input):
+def check_input(input):
     '''
     Ensure that input is Pandas DataFrame format ready for time series analysis.
     '''
-    if not type(input) == pd.DataFrame:
-        if type(input) == pd.Series:
-            input = input.to_frame()
+    ipt = copy.deepcopy(input)
+    if not type(ipt) == pd.DataFrame:
+        if type(ipt) == pd.Series:
+            ipt = ipt.to_frame()
         else:
             # attempt to construct DataFrame
-            input = pd.DataFrame(input)
-    if not type(input.index) == pd.core.indexes.datetimes.DatetimeIndex:
-        # try to coerce in case it is already dates ?
+            ipt = pd.DataFrame(ipt)
+    if not type(ipt.index) == pd.DatetimeIndex:
         try:
-            input.index = pd.DatetimeIndex(input.index)
+            ipt = set_date_index(ipt)
         except:
             warnings.warn('Unable to coerce index to DatetimeIndex; \
                            attempting to find date column to use as index')
-            # use _find_date_col() to try to guess, with warning
             try:
-                input.set_index(_find_date_col(input), inplace=True)
+                dc = find_date_col(ipt)
+                ipt[dc] = [pd.Timestamp(i) for i in ipt[dc]]
+                ipt.set_index(dc, inplace=True)
             except:
-                warnings.warn('Unable to set proper DatetimeIndex')
-                return None
-    return input
+                # this is slightly redundant as find_date_col will raise
+                raise TypeError('No column could be coerced to DatetimeIndex')
+    ipt.index.name = 'Date'  # set consistent index name
+    return ipt
 
-def _find_date_col(df, lazy=True):
+
+def set_date_index(df):
+    '''
+    Attempt to find and set a date index, possibly within a MultiIndex.
+    '''
+    assert type(df) == pd.DataFrame, 'something is horribly wrong'
+    idf = df.copy()
+    cand = None
+    if not type(df.index) == pd.MultiIndex:
+        idf.index = pd.DatetimeIndex(df.index)  # attempt in-place coercion
+    else:
+        for i in range(len(df.index.levels)):
+            try:
+                idf.index = pd.DatetimeIndex(df.index.levels[i])
+                cand = i
+            except:
+                pass
+        if cand is None:
+            raise TypeError('Index could not be coerced to DatetimeIndex')
+    return idf
+
+def find_date_col(df, lazy=True):
     '''
     Attempt to find date column to use as DatetimeIndex.
     '''
@@ -54,12 +77,11 @@ def _find_date_col(df, lazy=True):
         tc = df[col].iat[0]
         if type(tc) == float:
             continue
-        if type(tc) == int:
-            if len(str(tc)) != 8:
-                continue
+        if len(str(int(tc)))!= 8:
+            continue
         # try coercion to Timestamp
         try:
-            _ = pd.tslib.Timestamp(df[col].iat[0])
+            _ = pd.Timestamp(tc)
             cand = col
         except:
             pass
@@ -67,7 +89,7 @@ def _find_date_col(df, lazy=True):
         if lazy:
             return cand
         try:
-            idx = [pd.tslib.Timestamp(i) for i in df[cand]]
+            idx = [pd.Timestamp(i) for i in df[cand]]
         except:
             pass
     if idx is None:
@@ -78,29 +100,43 @@ def _find_date_col(df, lazy=True):
 # Feature Engineering Functions #
 #-------------------------------#
 
-# implicit - add_datepart is present
+'''
+IMPORTANT:
 
-def build_features(df):
+All _ functions called by build_features should not modify the passed df and return entirely
+Rather they should only return the ADDED columns, so that these can be composed in a modular fashion
+If we end up wanting to chain some of them, we can chain only those we want to chain
+No need to default to "all" or to repeatedly passing the same list of columns to modify in each
+This also keeps individual memory chunks smaller until joined at the end
+'''
+
+def build_features(df, **kwargs):
     '''
-    Wrapper to build various time series features.
+    Convenience wrapper to build various time series features.
     '''
-    df = _check_input(df)
-    idf = df.copy()
+    # unpack kwargs:
+    cols    = kwargs.get('cols', None)
+    maxlags = kwargs.get('maxlags', 5)  # match default for _add_AR
 
     # do things from other functions here, just do them intelligently
-    idf = _fastai_dateparts(idf)
-
+    cdf = check_input(df)
+    idf = cdf.join(fai_dps(cdf), how='outer')
+    idf = idf.join(streak(cdf, cols=cols), how='outer')
+    idf = idf.join(add_AR(cdf, cols=cols, maxlags=maxlags), how='outer')
+    # etc.
 
     return idf
 
-def _fastai_dateparts(df):
+
+def fai_dps(df):
     '''
     Wrapper for add_datepart since we index the date column.
     '''
     idf         = df.copy()
     idf['Date'] = idf.index
     add_datepart(idf, 'Date')
-    return idf
+    return idf.drop(df.columns, axis=1)
+
 
 def _calc_events(df):
     '''
@@ -108,6 +144,7 @@ def _calc_events(df):
     '''
 
     return None
+
 
 def _ttg(df, cols=None, percs=[.05, .1, .2, .25, .5]):
     '''
@@ -121,15 +158,17 @@ def _ttg(df, cols=None, percs=[.05, .1, .2, .25, .5]):
     # create new event columns for each relevant col; increment while gaining perc
     return None
 
-def _streak(df, cols=None):
+
+def streak(df, cols=None):
     '''
     '''
-    idf = df.copy()
+    idf = pd.DataFrame(index=df.index)
     if cols is None:
-        cols = idf._get_numeric_data().columns  # won't be perfect; watch for datepart
+        cols = df._get_numeric_data().columns  # won't be perfect; watch for datepart
     for col in cols:
         idf[col + '_streak'] = _col_streak(list(df[col]))
     return idf
+
 
 '''
 TODO:
@@ -155,3 +194,23 @@ def _col_streak(l):
                 tr.append(-1)
             sl.append('d')
     return tr
+
+
+def add_AR(df, cols=None, maxlags=5):
+    '''
+    Create lagged versions of each specified (numeric) column, up to maxlags.
+    '''
+    idf = pd.DataFrame(index=df.index)
+    if cols is None:
+        cols = df._get_numeric_data().columns
+    for col in cols:
+        for i in range(1, maxlags):
+            idf[col + 'AR{}'.format(i)] = df[col].shift(i)
+    return idf
+
+
+def _reversals(df, cols=None, window=65):
+    '''
+    Rolling count of directional reversals within a sliding window.
+    '''
+    return None
