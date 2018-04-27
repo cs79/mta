@@ -65,6 +65,7 @@ def set_date_index(df):
             raise TypeError('Index could not be coerced to DatetimeIndex')
     return idf
 
+
 def find_date_col(df, lazy=True):
     '''
     Attempt to find date column to use as DatetimeIndex.
@@ -96,6 +97,15 @@ def find_date_col(df, lazy=True):
         raise TypeError('No datetime-compatible columns found to use as index')
     return cand
 
+
+def sign(x):
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+    return 0
+
+
 #-------------------------------#
 # Feature Engineering Functions #
 #-------------------------------#
@@ -116,13 +126,15 @@ def build_features(df, **kwargs):
     '''
     # unpack kwargs:
     cols    = kwargs.get('cols', None)
-    maxlags = kwargs.get('maxlags', 5)  # match default for _add_AR
+    maxlags = kwargs.get('maxlags', 5)  # match _add_AR default
+    window  = kwargs.get('window', [65, 130, 260])  # match reversals default
 
     # do things from other functions here, just do them intelligently
     cdf = check_input(df)
     idf = cdf.join(fai_dps(cdf), how='outer')
     idf = idf.join(streak(cdf, cols=cols), how='outer')
     idf = idf.join(add_AR(cdf, cols=cols, maxlags=maxlags), how='outer')
+    idf = idf.join(reversals(cdf, cols=cols, window=window), how='outer')
     # etc.
 
     return idf
@@ -209,8 +221,37 @@ def add_AR(df, cols=None, maxlags=5):
     return idf
 
 
-def _reversals(df, cols=None, window=65):
+def reversals(df, cols=None, window=[65, 130, 260]):
     '''
     Rolling count of directional reversals within a sliding window.
     '''
-    return None
+    assert type(window) in (int, list), 'window must be int or list of ints'
+    if type(window) == list:
+        assert all([type(i) == int for i in window]), 'windows must be ints'
+    else:
+        window = [window]
+    idf = pd.DataFrame(index=df.index)
+    if cols is None:
+        cols = df._get_numeric_data().columns
+    for w in window:
+        for col in cols:
+            idf[col + '_revs{}'.format(w)] = _col_revs(list(df[col]), w)
+    return idf
+
+
+def _col_revs(l, w):
+    assert type(l) == list, 'l must be a list'
+    assert type(w) == int, 'w must be an int'
+    f = [0]
+    s = _col_streak(l)
+    for i in range(1, len(s)):
+        if sign(s[i]) != sign(s[i - 1]):
+            f.append(1)
+        else:
+            f.append(0)
+    return list(pd.Series(f).rolling(window=w).sum().values)
+
+    # flag each index as either "reversal" (1) or "no reversal" (0)
+    # based on comparison to previous index's value
+    # then just take rolling sum ? maybe better to do with a dataframe/series?
+    # start at 1, expand up to w, then start sliding ?
