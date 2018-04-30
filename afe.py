@@ -7,6 +7,8 @@
 import pandas as pd
 import numpy as np  # not sure if we will use
 from fastai.structured import add_datepart
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import normalize
 import warnings, copy
 
 #===========#
@@ -196,8 +198,10 @@ def build_features(df, **kwargs):
     '''
     # unpack kwargs:
     cols    = kwargs.get('cols', None)
-    maxlags = kwargs.get('maxlags', 5)  # match _add_AR default
-    window  = kwargs.get('window', [65, 130, 260])  # match reversals default
+    maxlags = kwargs.get('maxlags', 5)    # match _add_AR default
+    window  = kwargs.get('window', None)  # None: calc by default
+    n_comp  = kwargs.get('n_comp', 3)     # match add_PCs default
+    norm    = kwargs.get('norm', True)    # match add_PCs default
 
     # do things from other functions here, just do them intelligently
     cdf = check_input(df)
@@ -206,6 +210,7 @@ def build_features(df, **kwargs):
     idf = idf.join(add_AR(cdf, cols=cols, maxlags=maxlags), how='outer')
     idf = idf.join(reversals(cdf, cols=cols, window=window), how='outer')
     # etc.
+    idf = idf.join(add_PCs(cdf, cols=cols, n_comp=n_comp, norm=norm))
 
     # final step should be some kind of deduplication in case we have produced multiple copies of columns somehow (e.g. constants)
     idf = dedup(idf)
@@ -358,3 +363,17 @@ def _expanding_stats(df, cols=None):
     if cols is None:
         cols = df._get_numeric_data().columns
     return None
+
+
+def add_PCs(df, cols=None, n_comp=3, norm=True):
+    if cols is None:
+        cols = df._get_numeric_data().columns
+    if norm:
+        X = normalize(df[cols], axis=0)
+    else:
+        X = df[cols]
+    mod = PCA(n_components=n_comp)
+    col_names = ['PC_{}'.format(i) for i in range(1, n_comp + 1)]
+    transformed = pd.DataFrame(mod.fit_transform(X), index=df.index, \
+                               columns=col_names)
+    return transformed
