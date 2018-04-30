@@ -111,7 +111,7 @@ def get_windows(df):
     Get default windows for rolling calcs based on time series frequency.
     '''
     f = pd.infer_freq(df.index)
-    #TODO: fill this out using: https://stackoverflow.com/questions/35339139/where-is-the-documentation-on-pandas-freq-tags and also add a default by fraction of length of passed df maybe
+    # default mapping; "natural window" heuristic which may not be great
     wmap = {'B':   [5, 20, 65, 130, 260],                   \
             'D':   [7, 30, 90, 252, 365],                   \
             'W':   [4, 13, 26, 52, 78, 104],                \
@@ -151,8 +151,18 @@ def generic_windows(length, n=5):
     start = int(round(length * 0.001))  # kind of arbitrary; make this smarter
     stop = int(round(length * 0.05))
     w = np.log10(np.logspace(start, stop, n))
-    # TODO: check for duplicates, maybe enforce a minimum length input
-    return [int(i) for i in w]
+    w = [int(i) for i in w]
+    # check for bad values
+    if len(w) != len(set(w)):
+        warnings.warn('Duplicate windows created; truncating')
+        w = list(set(w))
+        w.sort()
+    if 1 in w:
+        warnings.warn('Length 1 window detected; removing')
+        w.remove(1)
+    if len(w) == 0:
+        raise ValueError('Insufficient length to create windows')
+    return w
 
 
 def dedup(df):
@@ -234,6 +244,7 @@ def _ttg(df, cols=None, percs=[.05, .1, .2, .25, .5]):
 
 def streak(df, cols=None):
     '''
+    Create features for consecutive streak in same direction.
     '''
     idf = pd.DataFrame(index=df.index)
     if cols is None:
@@ -282,10 +293,12 @@ def add_AR(df, cols=None, maxlags=5):
     return idf
 
 
-def reversals(df, cols=None, window=[65, 130, 260]):
+def reversals(df, cols=None, window=None):
     '''
     Rolling count of directional reversals within a sliding window.
     '''
+    if window is None:
+        window = get_windows(df)
     assert type(window) in (int, list), 'window must be int or list of ints'
     if type(window) == list:
         assert all([type(i) == int for i in window]), 'windows must be ints'
