@@ -106,6 +106,36 @@ def sign(x):
     return 0
 
 
+def get_windows(df):
+    f = pd.infer_freq(df.index)
+    #TODO: fill this out using: https://stackoverflow.com/questions/35339139/where-is-the-documentation-on-pandas-freq-tags and also add a default by fraction of length of passed df maybe
+    wmap = {'B': [5, 20, 65, 130, 260], \
+            'W': [4, 13, 26, 52]}  # etc.
+    try:
+        tr = wmap[f]
+    except:
+        tr = generic_windows(len(df))
+    return tr
+
+
+def generic_windows(length, n=5):
+    assert type(length) == int, 'length must be an int'
+    start = int(round(length * 0.001))  # kind of arbitrary; make this smarter
+    stop = int(round(length * 0.05))
+    w = np.log10(np.logspace(start, stop, n))
+    # TODO: check for duplicates, maybe enforce a minimum length input
+    return [int(i) for i in w]
+
+
+def dedup(df):
+    assert type(df) == pd.DataFrame
+    idf = df.T.drop_duplicates().T
+    diff = set(df.columns) - set(idf.columns)
+    if diff != set():
+        warnings.warn('Dropped duplicate valued columns: \n{}'.format(diff))
+    return idf
+
+
 #-------------------------------#
 # Feature Engineering Functions #
 #-------------------------------#
@@ -118,6 +148,8 @@ Rather they should only return the ADDED columns, so that these can be composed 
 If we end up wanting to chain some of them, we can chain only those we want to chain
 No need to default to "all" or to repeatedly passing the same list of columns to modify in each
 This also keeps individual memory chunks smaller until joined at the end
+
+For windowed functions, may want to use pd.infer_freq() to set default windows
 '''
 
 def build_features(df, **kwargs):
@@ -136,6 +168,9 @@ def build_features(df, **kwargs):
     idf = idf.join(add_AR(cdf, cols=cols, maxlags=maxlags), how='outer')
     idf = idf.join(reversals(cdf, cols=cols, window=window), how='outer')
     # etc.
+
+    # final step should be some kind of deduplication in case we have produced multiple copies of columns somehow (e.g. constants)
+    idf = dedup(idf)
 
     return idf
 
@@ -162,11 +197,9 @@ def _ttg(df, cols=None, percs=[.05, .1, .2, .25, .5]):
     '''
     This may be a specific case of "time since event"
     '''
-    idf = df.copy()
+    idf = pd.DataFrame(index=df.index)
     if cols is None:
-        idf = idf._get_numeric_data()
-    else:
-        idf = idf[cols]
+        idf = idf._get_numeric_data().columns
     # create new event columns for each relevant col; increment while gaining perc
     return None
 
@@ -217,7 +250,7 @@ def add_AR(df, cols=None, maxlags=5):
         cols = df._get_numeric_data().columns
     for col in cols:
         for i in range(1, maxlags):
-            idf[col + 'AR{}'.format(i)] = df[col].shift(i)
+            idf[col + '_AR{}'.format(i)] = df[col].shift(i)
     return idf
 
 
@@ -251,7 +284,36 @@ def _col_revs(l, w):
             f.append(0)
     return list(pd.Series(f).rolling(window=w).sum().values)
 
-    # flag each index as either "reversal" (1) or "no reversal" (0)
-    # based on comparison to previous index's value
-    # then just take rolling sum ? maybe better to do with a dataframe/series?
-    # start at 1, expand up to w, then start sliding ?
+
+def _rolling_stats(df, cols=None, window=None):
+    '''
+    Compute various rolling window statistics.
+    '''
+    # experimental - once this is working, convert other windowed functions
+    if cols is None:
+        cols = df._get_numeric_data().columns
+    if window is None:
+        window = get_windows(df)
+    if type(window) != list:
+        window = [window]
+    assert all([type(i) == int for i in window]), 'windows must be ints!'
+    idf = pd.DataFrame(index=df.index)
+    for w in window:
+        roll = df[cols].rolling(w)
+        # get other stats, name appropriately, join to idf
+        stds = roll.std().rename(columns=lambda x:
+                                         x + '_rolling_std_{}'.format(w))
+        mns = roll.mean().rename(columns=lambda x:
+                                         x + '_rolling_mean_{}'.format(w))
+        # TODO: add rolling volatility, corr, pctrank, "diverging std", zscore vs trailing X, etc.
+    idf = idf.join(stds, how='outer').join(mns, how='outer')
+    return idf
+
+
+def _expanding_stats(df, cols=None):
+    '''
+    Compute various expanding window statistics.
+    '''
+    if cols is None:
+        cols = df._get_numeric_data().columns
+    return None
