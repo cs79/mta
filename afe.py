@@ -107,10 +107,38 @@ def sign(x):
 
 
 def get_windows(df):
+    '''
+    Get default windows for rolling calcs based on time series frequency.
+    '''
     f = pd.infer_freq(df.index)
     #TODO: fill this out using: https://stackoverflow.com/questions/35339139/where-is-the-documentation-on-pandas-freq-tags and also add a default by fraction of length of passed df maybe
-    wmap = {'B': [5, 20, 65, 130, 260], \
-            'W': [4, 13, 26, 52]}  # etc.
+    wmap = {'B':   [5, 20, 65, 130, 260],                   \
+            'D':   [7, 30, 90, 252, 365],                   \
+            'W':   [4, 13, 26, 52, 78, 104],                \
+            'M':   [3, 6, 9, 12, 36, 24],                   \
+            'BM':  [3, 6, 9, 12, 36, 24],                   \
+            'MS':  [3, 6, 9, 12, 36, 24],                   \
+            'BMS': [3, 6, 9, 12, 36, 24],                   \
+            'Q':   [2, 3, 4, 6, 9, 12],                     \
+            'BQ':  [2, 3, 4, 6, 9, 12],                     \
+            'QS':  [2, 3, 4, 6, 9, 12],                     \
+            'BQS': [2, 3, 4, 6, 9, 12],                     \
+            # annual probably not advisable unless you have a really long TS...
+            'A':   [2, 3, 4, 5, 10],                        \
+            'BA':  [2, 3, 4, 5, 10],                        \
+            'AS':  [2, 3, 4, 5, 10],                        \
+            'BAS': [2, 3, 4, 5, 10],                        \
+            # trickier -- not sure what a good heuristic for these is:
+            'BH':  [2, 3, 4],                               \
+            'H':   [2, 3, 4, 5, 6, 8, 12],                  \
+            'T':   [5, 10, 15, 30, 60],                     \
+            'min': [5, 10, 15, 30, 60],                     \
+            'S':   [5, 10, 15, 30, 60],                     \
+            'L':   [10, 100, 1000],                         \
+            'ms':  [10, 100, 1000],                         \
+            'U':   [10, 100, 1000, 10000, 100000, 1000000], \
+            'us':  [10, 100, 1000, 10000, 100000, 1000000], \
+            'N':   [10, 100, 1000, 10000, 100000, 1000000]}
     try:
         tr = wmap[f]
     except:
