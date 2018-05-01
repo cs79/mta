@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import warnings
 # sklearn models to include with Ratchet
+from sklearn.linear_model import LinearRegression  # use this as test case
 # afe functionality to create features to ratchet, maybe? or assume that was done first?
 
 '''
@@ -31,15 +32,25 @@ class Ratchet:
     should be able to do things like change time_step and rerun w/out need to change much else, and then get easily comparable results
     '''
     def __init__(self, **kwargs):
-        self.model = kwargs.get('model', None)
-        self.df    = kwargs.get('df', None)
+        self.model     = kwargs.get('model', None)
+        self.df        = kwargs.get('df', None)
+        self.y_col     = kwargs.get('y_col', None)   # col to create y data
+        self.target    = kwargs.get('target', None)  # actual y data
+        self.verbose   = kwargs.get('verbose', True)
+        self.trt_set   = None
+        self.val_set   = None
+        self.time_grid = None
+        self.res       = RatchetResults()
         # etc. etc.
 
     def __repr__(self):
         infostr = 'Time Series Ratchet \
-                   \n{} \
-                   \n\nModel:\t{} \
-                   '.format('-'*19, self.model, self.df.shape if self.df is not None else 'N/A')
+                   \n{}\n \
+                   \nModel:\t{} \
+                   \nData:\t{} \
+                   \nTrT:\t{} \
+                   \nVal:\t{} \
+                   '.format('-'*19, self.model, self.df.shape if self.df is not None else 'N/A', self.trt_set.shape if self.trt_set is not None else 'N/A', self.val_set.shape if self.val_set is not None else 'N/A')
         return infostr
 
     def set_df(self, df):
@@ -49,15 +60,29 @@ class Ratchet:
         else:
             self.df = df
 
-    def get_val_set(self, val_pct=15):
+    # TODO: Make this a utility function rather than a method
+    # Can use to create target values ahead of time
+    def set_target(self):
+        '''
+        Generate y-values from an underlying dataset.
+        '''
+
+    def get_val_set(self, val_pct=0.15):
+        assert val_pct >= 0
+        assert val_pct <= 1
         if self.df is None:
             warnings.warn('No data to subset! Load a dataframe to this Ratchet')
         else:
-            cutoff = int(len(df) * val_pct / 100)
+            cutoff = int(len(self.df) * val_pct)
             self.val_set = self.df[-cutoff:]
-            self.trt_set = self.df[:cutoff]
+            self.trt_set = self.df[:-cutoff]
 
-    # TODO: during actual "ratchet" process, need to do train/test split still; assert self.trt_set during ratchet
+    # TODO: during actual "ratchet" process, need to do train/test split still
+    def tts(self, df, train_pct=0.6):
+        assert train_pct >= 0
+        assert train_pct <= 1
+        cutoff = int(len(df) * train_pct)
+        return df[:cutoff], df[cutoff:]
 
     def set_decay(self, de):
         assert type(de) == DecayEnvelope
@@ -78,18 +103,29 @@ class Ratchet:
             run = 'n'
         if n is not None and step_size is not None:
             raise ValueError('Pass exactly one of n, step_size')
-        if run == 'step':
-            pts = int(len(self.df)/step_size)
+        if run == 'n':
+            step_size = int(len(self.df) / n)
             # default to linear spacing
-            for i in range(pts):
-                grid[i] = df.index[i]
-        else:
-            for i in range(len(df)):
-                if i%n == 0:
-                    grid[i] = df.index[i]
-        # TODO: need to leave a buffer at front of time series, OR check it during ratchet to see if there is enough data to build from
+            for i in range(len(self.df)):
+                if i % step_size == 0:
+                    grid[i] = self.df.index[i]
+        # TODO: need to leave a buffer at front of time series, OR check it during ratchet to see if there is enough data to build from; also this currently returns n+1 grid points when passing n
         assert grid != {}, 'Failed to set grid'
         self.time_grid = grid
+
+    def ratchet(self):
+        assert self.res is not None
+        assert self.model is not None
+        assert self.trt_set is not None
+        assert self.time_grid is not None
+        for i in self.time_grid:
+            train, test = self.tts(self.trt_set[:i])  # not sure this will work
+            fitted = self.model.fit(train)  # store fitted? or no need?
+            self.res.preds[i] = fitted.predict(test)
+            self.res.vpreds[i] = fitted.predict(self.val)
+            if self.verbose:
+                print('Fit model {} for step {} of {}'\
+                      .format(self.model, i, max(self.time_grid.keys())))
 
 
 # a DecayEnvelope * a TimeGrid should produce the indices for the models in the ensemble
@@ -108,3 +144,4 @@ class RatchetResults:
     '''
     def __init__(self):
         self.preds = {}
+        self.vpreds = {}
