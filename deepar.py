@@ -34,8 +34,9 @@ class Ratchet:
     def __init__(self, **kwargs):
         self.model     = kwargs.get('model', None)
         self.df        = kwargs.get('df', None)
-        self.y_col     = kwargs.get('y_col', None)   # col to create y data
-        self.target    = kwargs.get('target', None)  # actual y data
+        self.y_col     = kwargs.get('y_col', None)     # col to create y data
+        self.target    = kwargs.get('target', None)    # actual y data
+        self.envelope  = kwargs.get('envelope', None)  # think about how to pass
         self.verbose   = kwargs.get('verbose', True)
         self.trt_set   = None
         self.val_set   = None
@@ -50,7 +51,22 @@ class Ratchet:
                    \nData:\t{} \
                    \nTrT:\t{} \
                    \nVal:\t{} \
-                   '.format('-'*19, self.model, self.df.shape if self.df is not None else 'N/A', self.trt_set.shape if self.trt_set is not None else 'N/A', self.val_set.shape if self.val_set is not None else 'N/A')
+                   \nY:\t{}\n \
+                   \nData Load: \
+                   \n{}\n \
+                   \nDF:\t{} \
+                   \nTarget:\t{} \
+                   \nGrid:\t{} \
+                   '.format('-'*19, \
+                            self.model, \
+                            self.df.shape if self.df is not None else 'N/A', \
+                            self.trt_set.shape if self.trt_set is not None else 'N/A', \
+                            self.val_set.shape if self.val_set is not None else 'N/A', \
+                            self.target.shape if self.target is not None else 'N/A', \
+                            '-'*9, \
+                            True if self.df is not None else False, \
+                            True if self.target is not None else False, \
+                            True if self.time_grid is not None else False)
         return infostr
 
     def set_df(self, df):
@@ -62,10 +78,14 @@ class Ratchet:
 
     # TODO: Make this a utility function rather than a method
     # Can use to create target values ahead of time
-    def set_target(self):
+    def set_target(self, n=1):
         '''
         Generate y-values from an underlying dataset.
         '''
+        assert self.df is not None
+        assert self.y_col is not None
+        self.target = self.df[self.y_col].shift(-n).to_frame()
+        # TODO: make this able to generate multiple targets; make Ratchet able to store multiple targets, make Ratchet.ratchet() able to fit vs. multiple targets
 
     def get_val_set(self, val_pct=0.15):
         assert val_pct >= 0
@@ -107,7 +127,7 @@ class Ratchet:
             step_size = int(len(self.df) / n)
             # default to linear spacing
             for i in range(len(self.df)):
-                if i % step_size == 0:
+                if (i % step_size == 0) & (i != 0):
                     grid[i] = self.df.index[i]
         # TODO: need to leave a buffer at front of time series, OR check it during ratchet to see if there is enough data to build from; also this currently returns n+1 grid points when passing n
         assert grid != {}, 'Failed to set grid'
@@ -118,9 +138,12 @@ class Ratchet:
         assert self.model is not None
         assert self.trt_set is not None
         assert self.time_grid is not None
+        if self.target is None:
+            warnings.warn('No target set; attempting to set with default value')
+            self.set_target()
         for i in self.time_grid:
             train, test = self.tts(self.trt_set[:i])  # not sure this will work
-            fitted = self.model.fit(train)  # store fitted? or no need?
+            fitted = self.model.fit(train, self.target)  # store fitted? or no need?
             self.res.preds[i] = fitted.predict(test)
             self.res.vpreds[i] = fitted.predict(self.val)
             if self.verbose:
