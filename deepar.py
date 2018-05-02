@@ -6,6 +6,7 @@
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import warnings
 # sklearn models to include with Ratchet
 from sklearn.linear_model import LinearRegression  # use this as test case
@@ -156,9 +157,72 @@ class DecayEnvelope:
     '''
     This should have a functional form, and relevant parameters for shaping it
     '''
+    allowable_spacing = ('linear', 'log')
     def __init__(self, **kwargs):
-        self.form = kwargs.get('form', None)
+        self.form     = kwargs.get('form', None)
+        self.spacing  = kwargs.get('spacing', 'linear')
+        self.start    = kwargs.get('start', None)
+        self.end      = kwargs.get('end', None)
+        self.formname = None
+        self.weights  = {}
         # etc.
+
+    def __repr__(self):
+        s = 'Decay Envelope \
+             \n{}\n \
+             \nForm:\t\t{} \
+             \nSpacing:\t{} \
+             '.format('-'*14, \
+                      self.formname if self.formname is not None else 'N/A', \
+                      self.spacing if self.spacing is not None else 'N/A')
+        return s
+
+    def plot(self):
+        assert self.form is not None
+        xs = np.linspace(self.start, self.end, 100)
+        ys = [self.form(i) for i in xs]
+        pd.DataFrame({'Y': ys}, index=xs).plot(grid=True)
+        plt.show()
+
+    # either have "canned" forms and pass a string as arg, or pass fn as arg
+    def set_form(self, form):
+        if not callable(form):
+            assert type(form) == str, 'Invalid form type'
+        if callable(form):
+            self.form = form
+            self.formname = 'Custom'
+        # canned string cases:
+        if form == 'linear':
+            self.form = lambda x: x
+            self.start = 0
+            self.end = 1
+            self.formname = 'Linear'
+        if form == 'tanh':
+            self.form = lambda x: np.tanh(x)
+            self.start = 0
+            self.end = 3  # visual guess
+            self.formname = 'Tanh'
+        if form == 'sin':
+            self.form = lambda x: np.sin(x)
+            self.start = 0
+            self.end = 1.5
+            self.formname = 'Sine'
+        if form == 'hyp':
+            self.form = lambda x: -x ** 2
+            self.start = -1
+            self.end = 0
+            self.formname = 'Hyperbolic'
+        # etc. - research some better options for these and use vetted numbers
+
+    def weight_grid(self, n=None):
+        '''
+        Get weights based on spacing and number of grid points to match.
+        '''
+        # can pass len(Ratchet.grid) for n, or allow passing of a grid directly
+        assert self.form is not None
+        assert self.spacing in self.allowable_spacing
+        # TODO: check whether y-values are negative (as they are form some forms... this will screw weights up entirely - need to shift to positive scale)
+
 
 class RatchetResults:
     '''
